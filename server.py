@@ -1,4 +1,4 @@
-# server_enhanced.py
+# server_improved.py
 import os
 import io
 import logging
@@ -29,10 +29,10 @@ import scipy.signal as signal
 import time
 from datetime import datetime, timedelta
 
-import pytz  # Установи: pip install pytz
+import pytz
 
 # Установи нужный часовой пояс
-SERVER_TIMEZONE = pytz.timezone('Europe/Moscow')  # Или 'UTC' если хочешь универсально
+SERVER_TIMEZONE = pytz.timezone('Europe/Moscow')
 
 def get_current_datetime():
     """Возвращает текущее время в выбранном часовом поясе"""
@@ -43,7 +43,7 @@ def get_current_date():
     return datetime.now(SERVER_TIMEZONE).strftime("%Y-%m-%d")
 
 # ---- Logging ----
-logger = logging.getLogger("cough_server_enhanced")
+logger = logging.getLogger("cough_server_improved")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -54,15 +54,15 @@ logger.addHandler(ch)
 UPLOAD_FOLDER = "uploads"
 DEBUG_FOLDER = "debug_wavs"
 DB_PATH = "cough_db.db"
-CLEANUP_INTERVAL_HOURS = 1  # Автоочистка каждые 1 час
-KEEP_COUGH_FILES_DAYS = 7   # Хранить файлы с кашлем 7 дней
-KEEP_OTHER_FILES_HOURS = 24 # Хранить остальные файлы 24 часа
+CLEANUP_INTERVAL_HOURS = 1
+KEEP_COUGH_FILES_DAYS = 7
+KEEP_OTHER_FILES_HOURS = 24
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DEBUG_FOLDER, exist_ok=True)
 
 # ---- FastAPI ----
-app = FastAPI(title="Enhanced Cough Detection Server")
+app = FastAPI(title="Improved Cough Detection Server")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -123,32 +123,29 @@ def find_cough_indices() -> List[int]:
 
 # ---- Audio Processing ----
 def decode_android_audio(audio_bytes: bytes, original_filename: str):
-    """РАДИКАЛЬНОЕ решение - обход битых WAV заголовков"""
+    """Улучшенное декодирование Android аудио"""
     
     file_ext = original_filename.lower().split('.')[-1] if '.' in original_filename else ''
     
-    # Если это WAV файл, пробуем РАДИКАЛЬНЫЕ методы
+    # Если это WAV файл, пробуем методы для Android
     if file_ext == 'wav':
-        logger.info("🔄 Detected WAV file, using radical decoding methods...")
+        logger.info("🔄 Detected WAV file, using Android decoding methods...")
         
         try:
             # МЕТОД 1: Пытаемся прочитать как сырые PCM данные
-            # Предполагаем стандартные параметры: 16kHz, 16-bit, mono
             try:
-                # Пробуем интерпретировать как PCM 16-bit
                 y = np.frombuffer(audio_bytes[44:], dtype=np.int16).astype(np.float32) / 32768.0
-                if len(y) > 1000:  # Если получили разумное количество samples
+                if len(y) > 1000:
                     logger.info("✅ Success with raw PCM decoding")
                     return {'audio': y, 'sr': 16000, 'method': 'raw_pcm'}
             except:
                 pass
             
-            # МЕТОД 2: Пробуем найти начало аудиоданных (пропускаем заголовок)
+            # МЕТОД 2: Пробуем найти начало аудиоданных
             try:
-                # Ищем данные после 'data' chunk (обычно 44 байта)
                 data_start = audio_bytes.find(b'data')
                 if data_start != -1:
-                    audio_data = audio_bytes[data_start + 8:]  # +8 чтобы пропустить 'data' и размер
+                    audio_data = audio_bytes[data_start + 8:]
                     y = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
                     if len(y) > 1000:
                         logger.info("✅ Success with data chunk decoding")
@@ -156,24 +153,22 @@ def decode_android_audio(audio_bytes: bytes, original_filename: str):
             except:
                 pass
             
-            # МЕТОД 3: Пробуем загрузить как сырые данные без заголовка
+            # МЕТОД 3: Загружаем как сырые данные
             try:
-                # Просто берем все данные как PCM
                 y = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-                # Фильтруем только разумные значения (избегаем шум)
-                y = y[np.abs(y) < 1.0]  # убираем выбросы
-                if len(y) > 48000:  # 3 секунды при 16kHz
-                    y = y[:48000]  # обрезаем до 3 секунд
+                y = y[np.abs(y) < 1.0]
+                if len(y) > 48000:
+                    y = y[:48000]
                     logger.info("✅ Success with full buffer decoding")
                     return {'audio': y, 'sr': 16000, 'method': 'full_buffer'}
             except:
                 pass
                 
         except Exception as e:
-            logger.warning(f"All radical WAV methods failed: {e}")
+            logger.warning(f"All WAV methods failed: {e}")
     
-    # Если WAV методы не сработали или это не WAV, используем старую логику
-    logger.info("🔄 Falling back to standard decoding...")
+    # Fallback на FFmpeg
+    logger.info("🔄 Falling back to FFmpeg decoding...")
     with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_input:
         tmp_input.write(audio_bytes)
         tmp_input.flush()
@@ -254,7 +249,7 @@ def decode_with_ffmpeg_aac(input_path: str):
         'ffmpeg', '-i', input_path,
         '-ac', '1', '-ar', '16000', 
         '-acodec', 'pcm_s16le',
-        '-af', 'volume=2.0,highpass=f=100',
+        '-af', 'volume=1.5,highpass=f=100',
         '-y', output_path
     ]
     
@@ -316,217 +311,202 @@ def evaluate_audio_quality(y):
     total_score = level_score * 0.4 + dynamic_score * 0.3 + speech_score * 0.3
     return total_score
 
-def enhanced_audio_processing(y, sr):
-    """Улучшенная обработка аудио для Android записей"""
-    
-    # 1. Шумоподавление
-    try:
-        noise_sample = y[:min(16000, len(y)//4)]
-        y_denoised = nr.reduce_noise(y=y, sr=sr, y_noise=noise_sample, prop_decrease=0.8, stationary=True)
-    except:
-        y_denoised = y
-    
-    # 2. Агрессивное усиление для тихих записей
-    current_max = np.max(np.abs(y_denoised))
-    if current_max < 0.1:
-        gain = 10.0
-    elif current_max < 0.3:
-        gain = 5.0
-    else:
-        gain = 2.0
-    
-    y_amplified = y_denoised * gain
-    
-    # 3. Компрессия
-    threshold = 0.3
-    ratio = 4
-    y_compressed = np.where(np.abs(y_amplified) > threshold, 
-                           threshold + (y_amplified - threshold) / ratio, 
-                           y_amplified)
-    
-    # 4. Полосовая фильтрация для кашля
-    sos_low = signal.butter(4, 100, 'high', fs=sr, output='sos')
-    sos_high = signal.butter(4, 4000, 'low', fs=sr, output='sos')
-    
-    y_filtered = signal.sosfilt(sos_low, y_compressed)
-    y_filtered = signal.sosfilt(sos_high, y_filtered)
-    
-    # 5. Финальная нормализация
-    max_amp = np.max(np.abs(y_filtered))
-    if max_amp > 0:
-        y_final = y_filtered / max_amp * 0.9
-    else:
-        y_final = y_filtered
-    
-    return y_final
+def gentle_audio_preprocessing(y: np.ndarray, sr: int) -> np.ndarray:
+    """
+    МЯГКАЯ предобработка - сохраняет кашель, убирает только явный шум
+    """
+    if y is None or len(y) == 0:
+        return y
 
-# ---- Enhanced Analysis ----
+    # 1. Делаем моно
+    if y.ndim > 1:
+        y = np.mean(y, axis=1)
+
+    # 2. Убираем DC смещение
+    y = y - np.mean(y)
+
+    # 3. ВЫБОРОЧНОЕ шумоподавление (только если много шума)
+    rms_before = np.sqrt(np.mean(y**2))
+    if rms_before < 0.01:  # Очень тихий сигнал
+        try:
+            noise_sample = y[:min(8000, len(y)//8)]
+            y = nr.reduce_noise(y=y, sr=sr, y_noise=noise_sample, 
+                              prop_decrease=0.6,  # МЕНЬШЕ подавления
+                              stationary=True)
+        except:
+            pass
+
+    # 4. Полосовая фильтрация для кашля (100-4000 Hz)
+    try:
+        sos = signal.butter(4, [100, 4000], 'bandpass', fs=sr, output='sos')
+        y = signal.sosfilt(sos, y)
+    except:
+        pass
+
+    # 5. МЯГКАЯ нормализация (без клиппинга)
+    max_amp = np.max(np.abs(y))
+    if max_amp > 0:
+        y = y / max_amp * 0.95  # Оставляем запас
+
+    return y
+
+def improved_cough_detector(y, sr, scores, filename) -> Dict[str, Any]:
+    """
+    УПРОЩЁННЫЙ И ПОВЫШЕННО-ЧУВСТВИТЕЛЬНЫЙ детектор кашля.
+    Дает больше срабатываний, но без жестких требований.
+    """
+    cough_idxs = find_cough_indices()
+    if not cough_idxs:
+        return {
+            "probability": 0.0,
+            "cough_detected": False,
+            "message": "No cough classes in YAMNet"
+        }
+
+    cough_scores = scores[:, cough_idxs]
+    per_frame = np.max(cough_scores, axis=1)
+
+    max_prob = float(np.max(per_frame))
+    mean_prob = float(np.mean(per_frame))
+
+    # ЧУВСТВИТЕЛЬНЫЕ ПОРОГИ
+    weak_frames = np.sum(per_frame > 0.015)    # было 0.05
+    medium_frames = np.sum(per_frame > 0.06)  # было 0.15
+    strong_frames = np.sum(per_frame > 0.12)  # было 0.30
+
+    # Мягкая логика — кашель учитывается даже при слабом сигнале
+    detection_score = (
+        max_prob * 0.7 +
+        (medium_frames / len(per_frame)) * 0.5 +
+        (strong_frames > 0) * 0.3
+    )
+
+    # НОВЫЙ ПОРОГ
+    cough_detected = detection_score > 0.11 or max_prob > 0.2
+
+    logger.info(
+        f"[DETECT] {filename} | max_prob={max_prob:.3f} "
+        f"mean={mean_prob:.3f} weak={weak_frames} med={medium_frames} strong={strong_frames} "
+        f"=> DETECT={cough_detected}"
+    )
+
+    return {
+        "probability": round(float(detection_score), 3),
+        "cough_detected": bool(cough_detected),
+        "message": "sensitive_detector",
+        "max_probability": round(max_prob, 3),
+        "weak_frames": int(weak_frames),
+        "medium_frames": int(medium_frames),
+        "strong_frames": int(strong_frames),
+    }
+
+
+def accurate_cough_counter(per_frame_cough: np.ndarray, frame_hop_sec: float = 0.016) -> int:
+    """
+    ТОЧНЫЙ подсчет отдельных кашлевых событий
+    """
+    if per_frame_cough is None or len(per_frame_cough) == 0:
+        return 0
+
+    # ВЫШЕ порог для уверенного кашля
+    threshold = 0.3  # был 0.25
+    min_gap_sec = 0.5  # Минимум 0.5 сек между кашлями
+    min_duration_sec = 0.1  # Минимум 0.1 сек длительность
+    min_gap_frames = max(1, int(min_gap_sec / frame_hop_sec))
+    min_duration_frames = max(1, int(min_duration_sec / frame_hop_sec))
+    
+    cough_peaks = 0
+    in_cough = False
+    cough_start = 0
+    last_peak_end = -9999
+    
+    for i in range(len(per_frame_cough)):
+        current_prob = per_frame_cough[i]
+        
+        if current_prob >= threshold and not in_cough:
+            # Начало кашля
+            in_cough = True
+            cough_start = i
+            
+        elif current_prob < threshold and in_cough:
+            # Конец кашля
+            in_cough = False
+            cough_duration = (i - cough_start) * frame_hop_sec
+            
+            # Проверяем что это достаточно длинный кашель
+            if cough_duration >= min_duration_sec and (cough_start - last_peak_end) >= min_gap_frames:
+                cough_peaks += 1
+                last_peak_end = i
+    
+    # Обрабатываем случай, когда кашель до конца записи
+    if in_cough:
+        cough_duration = (len(per_frame_cough) - cough_start) * frame_hop_sec
+        if cough_duration >= min_duration_sec and (cough_start - last_peak_end) >= min_gap_frames:
+            cough_peaks += 1
+    
+    return cough_peaks
+
 def run_yamnet(waveform: np.ndarray):
-    waveform_tf = tf.convert_to_tensor(waveform, dtype=tf.float32)
+    """
+    Передаём одномерный waveform float32 в yamnet.
+    """
+    wf = waveform.astype(np.float32)
+    waveform_tf = tf.convert_to_tensor(wf, dtype=tf.float32)
     scores, embeddings, spectrogram = YAMNET_MODEL(waveform_tf)
     return scores.numpy(), embeddings.numpy(), spectrogram.numpy()
 
-def aggressive_cough_detector_enhanced(y, sr, scores, filename):
-    """УЛУЧШЕННЫЙ агрессивный детектор кашля для Android записей"""
-    
-    cough_idxs = find_cough_indices()
-    
-    if not cough_idxs:
-        return 0.0, False, "No cough classes in YAMNet"
-    
-    cough_scores = scores[:, cough_idxs]
-    per_frame_cough = np.max(cough_scores, axis=1)
-    
-    # БАЗОВЫЕ МЕТРИКИ YAMNet
-    max_prob = np.max(per_frame_cough)
-    mean_prob = np.mean(per_frame_cough)
-    
-    # Android-specific: более агрессивные пороги
-    very_weak_frames = np.sum(per_frame_cough > 0.005)
-    weak_frames = np.sum(per_frame_cough > 0.01)
-    medium_frames = np.sum(per_frame_cough > 0.03)
-    strong_frames = np.sum(per_frame_cough > 0.08)
-    
-    total_frames = len(per_frame_cough)
-    
-    # АНАЛИЗ ЭНЕРГЕТИЧЕСКИХ ПАТТЕРНОВ
-    energy_features = analyze_energy_patterns(y, sr)
-    
-    # АГРЕССИВНАЯ ЛОГИКА ДЛЯ ANDROID
-    detection_reasons = []
-    base_prob = 0.0
-    
-    # Основные критерии
-    if strong_frames >= 1:
-        base_prob += 0.5
-        detection_reasons.append(f"strong({strong_frames})")
-    elif medium_frames >= 2:
-        base_prob += 0.4
-        detection_reasons.append(f"medium({medium_frames})")
-    elif weak_frames >= 3:
-        base_prob += 0.3
-        detection_reasons.append(f"weak({weak_frames})")
-    elif very_weak_frames >= 5:
-        base_prob += 0.2
-        detection_reasons.append(f"vweak({very_weak_frames})")
-    
-    # Бонус за энергетические паттерны
-    if energy_features['valid_cough_like_events'] >= 1:
-        base_prob += 0.2
-        detection_reasons.append(f"energy_events({energy_features['valid_cough_like_events']})")
-    
-    # Бонус за максимальную вероятность
-    if max_prob > 0.05:
-        base_prob += max_prob
-        detection_reasons.append(f"maxP({max_prob:.3f})")
-    
-    final_prob = min(base_prob, 0.95)
-    
-    # ОЧЕНЬ АГРЕССИВНОЕ РЕШЕНИЕ ДЛЯ ANDROID
-    cough_detected = (
-        strong_frames >= 1 or
-        medium_frames >= 2 or 
-        weak_frames >= 3 or
-        (very_weak_frames >= 4 and energy_features['valid_cough_like_events'] >= 1) or
-        final_prob > 0.25
-    )
-    
-    reason = " + ".join(detection_reasons) if detection_reasons else "marginal_signals"
-    
-    logger.info(f"Enhanced detection: {filename} - prob: {final_prob:.3f}, detected: {cough_detected}, reason: {reason}")
-    
-    return final_prob, cough_detected, reason
-
-def analyze_energy_patterns(y, sr):
-    """Анализ энергетических паттернов характерных для кашля"""
-    frame_len = int(0.02 * sr)
-    hop_len = frame_len // 2
-    
-    energies = []
-    for i in range(0, len(y) - frame_len, hop_len):
-        frame = y[i:i + frame_len]
-        energies.append(np.sqrt(np.mean(frame**2)))
-    
-    energies = np.array(energies)
-    
-    # Ищем резкие короткие всплески
-    threshold = np.percentile(energies, 80)
-    spikes = energies > threshold
-    
-    # Группируем смежные всплески
-    cough_like_events = 0
-    in_event = False
-    event_start = 0
-    
-    for i, is_spike in enumerate(spikes):
-        if is_spike and not in_event:
-            in_event = True
-            event_start = i
-        elif not is_spike and in_event:
-            in_event = False
-            event_duration = (i - event_start) * (hop_len / sr)
-            if 0.05 < event_duration < 1.0:
-                cough_like_events += 1
-    
-    return {
-        'valid_cough_like_events': cough_like_events,
-        'total_spikes': np.sum(spikes),
-        'max_energy': np.max(energies)
-    }
-
-def analyze_audio_enhanced(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
-    """УЛУЧШЕННЫЙ анализ аудио с гибридным подходом"""
+def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
     try:
-        # Улучшенное декодирование
+        # 1. Декодирование
         decoding_result = decode_android_audio(audio_bytes, filename)
         y = decoding_result['audio']
         sr = decoding_result['sr']
-        
-        logger.info(f"Decoded: {len(y)} samples, SR: {sr}, method: {decoding_result['method']}")
-        
-        # Улучшенная обработка
-        y_processed = enhanced_audio_processing(y, sr)
-        
-        # Анализ YAMNet
-        scores, _, _ = run_yamnet(y_processed)
-        
-        # Топ классы
+
+        # 2. Усиление / нормализация
+        def normalize_audio(y, target_peak=0.98):
+            max_amp = np.max(np.abs(y))
+            if max_amp < 1e-6:
+                return y
+            gain = target_peak / max_amp
+            return y * gain
+
+        y = normalize_audio(y)
+
+        # 3. Мягкая обработка
+        y = gentle_audio_preprocessing(y, sr)
+
+        # 4. Один прогон YAMNet
+        scores, emb, spec = run_yamnet(y)
+
+        # 5. Пики кашля
+        cough_idxs = find_cough_indices()
+        per_frame = np.max(scores[:, cough_idxs], axis=1)
+
+        per_frame_smoothed = np.convolve(per_frame, np.ones(3)/3, mode='same')
+        max_peak = float(np.max(per_frame_smoothed))
+        cough_detected = max_peak > 0.005
+
+
+        # 6. Топ классы
         mean_scores = np.mean(scores, axis=0)
         top5_idx = np.argsort(mean_scores)[-5:][::-1]
         top5 = [(CLASS_NAMES[i], float(mean_scores[i])) for i in top5_idx]
-        
-        # Улучшенный детектор кашля
-        final_prob, detected, reason = aggressive_cough_detector_enhanced(y_processed, sr, scores, filename)
-        
-        # Детальная статистика
-        cough_idxs = find_cough_indices()
-        cough_stats = {}
-        if cough_idxs:
-            cough_scores = scores[:, cough_idxs]
-            per_frame = np.max(cough_scores, axis=1)
-            cough_stats = {
-                "max_cough": float(np.max(per_frame)),
-                "mean_cough": float(np.mean(per_frame)),
-                "cough_frames": int(np.sum(per_frame > 0.05)),
-                "total_frames": len(per_frame)
-            }
-        
-        result = {
-            "probability": round(final_prob, 3),
-            "cough_detected": detected,
-            "message": f"Enhanced detection: {reason}",
+
+        return {
+            "probability": max_peak,
+            "cough_detected": cough_detected,
+            "message": "peak_detected" if cough_detected else "no_significant_peaks",
+            "max_probability": max_peak,
+            "total_frames": len(per_frame),
+            "cough_frames": int(np.sum(per_frame > 0.1)),
             "top_classes": top5,
-            "cough_stats": cough_stats,
-            "decoding_method": decoding_result['method'],
-            "processing_applied": True
+            "decoding_method": decoding_result["method"]
         }
-        
-        return convert_numpy_types(result)
-        
+
     except Exception as e:
-        logger.error(f"Enhanced analysis failed: {e}")
-        # Fallback на базовый анализ
+        logger.error(f"Improved analysis failed: {e}")
         return analyze_audio_fallback(audio_bytes)
+
 
 def analyze_audio_fallback(audio_bytes: bytes) -> Dict[str, Any]:
     """Базовый анализ как fallback"""
@@ -696,7 +676,7 @@ async def upload_audio(audio: UploadFile = File(...), device_id: str = Form("unk
         logger.info(f"💾 Saved raw file: {path} в {current_datetime}")
         
         # УЛУЧШЕННЫЙ анализ
-        result = analyze_audio_enhanced(raw, audio.filename)
+        result = analyze_audio_improved(raw, audio.filename)
         
         # Сохраняем в базу с ЕДИНЫМ ВРЕМЕНЕМ
         conn = sqlite3.connect(DB_PATH)
@@ -711,7 +691,7 @@ async def upload_audio(audio: UploadFile = File(...), device_id: str = Form("unk
             result.get("message", ""),
             str(result.get("top_classes", [])),
             str(result.get("cough_stats", {})),
-            current_datetime  # ЯВНО УКАЗЫВАЕМ ВРЕМЯ СЕРВЕРА
+            current_datetime
         ))
         conn.commit()
         conn.close()
@@ -748,11 +728,6 @@ async def get_stats(device_id: str):
         avg_prob = float(stats[2] or 0.0) if stats and stats[2] is not None else 0.0
         
         logger.info(f"📊 Статистика сегодня: total={total}, coughs={total_coughs}, avg_prob={avg_prob}")
-        
-        # Проверяем что вообще есть в базе
-        cursor.execute('SELECT COUNT(*) FROM cough_records WHERE device_id=?', (device_id,))
-        total_device_records = cursor.fetchone()[0] or 0
-        logger.info(f"📊 Всего записей для устройства {device_id}: {total_device_records}")
         
         # Статистика по часам
         cursor.execute('''
@@ -802,7 +777,7 @@ async def get_stats(device_id: str):
             else:
                 intensity = "Низкая"
             
-            # Тренд (простая логика)
+            # Тренд
             cursor.execute('''
                 SELECT COUNT(*) FROM cough_records 
                 WHERE device_id=? AND cough_detected=1 AND DATE(timestamp)=DATE('now', '-1 day')
@@ -858,17 +833,7 @@ async def manual_cleanup():
     cleanup_old_files()
     return {"status": "cleanup completed"}
 
-# ---- Startup ----
-@app.on_event("startup")
-async def startup_event():
-    """Запускается при старте сервера"""
-    logger.info("🚀 Starting Enhanced Cough Detection Server")
-    start_cleanup_scheduler()
-    # Сразу запускаем очистку при старте
-    cleanup_old_files()
-
-# Добавь эти endpoint'ы после существующих
-
+# ---- Debug Endpoints ----
 @app.get("/debug/db")
 async def debug_db():
     """Отладочный endpoint для проверки базы данных"""
@@ -876,11 +841,9 @@ async def debug_db():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Проверяем все записи
         cursor.execute('SELECT COUNT(*) as total, SUM(cough_detected) as coughs FROM cough_records')
         stats = cursor.fetchone()
         
-        # Последние 5 записей
         cursor.execute('''
             SELECT device_id, filename, probability, cough_detected, timestamp 
             FROM cough_records 
@@ -909,26 +872,15 @@ async def debug_db():
 
 @app.get("/debug/stats/{device_id}")
 async def debug_stats(device_id: str):
-    """Отладочная версия статистики с подробными логами"""
+    """Отладочная версия статистики"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = get_current_date()
         
         logger.info(f"🔍 DEBUG STATS: device_id={device_id}, today={today}")
         
-        # Проверяем какие записи есть в базе для этого устройства
-        cursor.execute('''
-            SELECT COUNT(*), device_id, DATE(timestamp) 
-            FROM cough_records 
-            WHERE device_id=? 
-            GROUP BY device_id, DATE(timestamp)
-        ''', (device_id,))
-        device_stats = cursor.fetchall()
-        
-        logger.info(f"🔍 DEBUG: Записи для устройства {device_id}: {device_stats}")
-        
-        # Основная статистика за сегодня - ИСПРАВЛЕННЫЙ ЗАПРОС
+        # Основная статистика за сегодня
         cursor.execute('''
             SELECT COUNT(*), 
                    SUM(CASE WHEN cough_detected=1 THEN 1 ELSE 0 END),
@@ -942,22 +894,6 @@ async def debug_stats(device_id: str):
         total_coughs = int(stats[1] or 0) if stats else 0
         avg_prob = float(stats[2] or 0.0) if stats and stats[2] is not None else 0.0
         
-        logger.info(f"🔍 DEBUG: Статистика сегодня - total: {total}, coughs: {total_coughs}, avg_prob: {avg_prob}")
-        
-        # Проверяем все записи за сегодня
-        cursor.execute('''
-            SELECT filename, cough_detected, probability, timestamp 
-            FROM cough_records 
-            WHERE device_id=? AND DATE(timestamp)=?
-            ORDER BY timestamp DESC
-        ''', (device_id, today))
-        today_records = cursor.fetchall()
-        
-        logger.info(f"🔍 DEBUG: Записи за сегодня: {len(today_records)}")
-        for record in today_records:
-            logger.info(f"🔍 DEBUG: {record}")
-        
-        # Остальной код статистики...
         # Статистика по часам
         cursor.execute('''
             SELECT strftime('%H', timestamp) as hr, COUNT(*) 
@@ -998,30 +934,22 @@ async def debug_stats(device_id: str):
                 "cough_frequency": f"{total_coughs} раз/день",
                 "intensity": "Высокая" if avg_prob > 0.7 else "Средняя" if avg_prob > 0.3 else "Низкая",
                 "trend": "📊"
-            },
-            "debug_info": {
-                "device_id": device_id,
-                "today": today,
-                "today_records_count": len(today_records),
-                "all_records_for_device": device_stats
             }
         }
         
-        logger.info(f"🔍 DEBUG: Финальный результат: {result}")
         return result
         
     except Exception as e:
         logger.exception(f"DEBUG Stats error: {e}")
         return JSONResponse({"status": "error", "message": str(e)})
 
-@app.get("/debug/time")
-async def debug_time():
-    """Показать текущее время сервера"""
-    return {
-        "server_time": get_current_datetime(),
-        "server_date": get_current_date(),
-        "timezone": "Europe/Moscow"  # или тот что используешь
-    }
+# ---- Startup ----
+@app.on_event("startup")
+async def startup_event():
+    """Запускается при старте сервера"""
+    logger.info("🚀 Starting Improved Cough Detection Server")
+    start_cleanup_scheduler()
+    cleanup_old_files()
 
 if __name__ == "__main__":
     # Получаем порт из переменной окружения (Railway сам назначает)
