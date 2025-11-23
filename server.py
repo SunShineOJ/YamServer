@@ -455,7 +455,7 @@ def run_yamnet(waveform: np.ndarray):
     scores, embeddings, spectrogram = YAMNET_MODEL(waveform_tf)
     return scores.numpy(), embeddings.numpy(), spectrogram.numpy()
 
-ef get_weighted_cough_score(scores):
+def get_weighted_cough_score(scores):
     weighted_frame_scores = []
 
     for i, class_name in enumerate(CLASS_NAMES):
@@ -994,4 +994,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
