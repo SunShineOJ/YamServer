@@ -455,6 +455,38 @@ def run_yamnet(waveform: np.ndarray):
     scores, embeddings, spectrogram = YAMNET_MODEL(waveform_tf)
     return scores.numpy(), embeddings.numpy(), spectrogram.numpy()
 
+ef get_weighted_cough_score(scores):
+    weighted_frame_scores = []
+
+    for i, class_name in enumerate(CLASS_NAMES):
+        low = class_name.lower()
+
+        # Прямой кашель — полный вес
+        if "cough" in low or "throat" in low:
+            weight = 7.5
+
+        # Дыхательные всплески — средний вес
+        elif any(x in low for x in ["breath", "wheeze", "gasp", "snort"]):
+            weight = 0.001
+
+        # Ошибочные, но частые животные — слабый вес
+        elif any(x in low for x in ["animal", "dog", "pig", "oink", "roar", "growl"]):
+            weight = 0.0009
+
+        else:
+            continue
+
+        # Добавляем взвешенные значения
+        weighted_frame_scores.append(scores[:, i] * weight)
+
+    if not weighted_frame_scores:
+        return np.zeros(len(scores))
+
+    # Суммируем все взвешенные классы
+    return np.max(np.stack(weighted_frame_scores, axis=1), axis=1)
+
+
+
 def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
     try:
         # 1. Декодирование
@@ -467,27 +499,28 @@ def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
             max_amp = np.max(np.abs(y))
             if max_amp < 1e-6:
                 return y
-            gain = target_peak / max_amp
-            return y * gain
+            return y * (target_peak / max_amp)
 
         y = normalize_audio(y)
 
-        # 3. Мягкая обработка
+        # 3. Мягкая фильтрация
         y = gentle_audio_preprocessing(y, sr)
 
-        # 4. Один прогон YAMNet
+        # 4. YAMNet
         scores, emb, spec = run_yamnet(y)
 
-        # 5. Пики кашля
-        cough_idxs = find_cough_indices()
-        per_frame = np.max(scores[:, cough_idxs], axis=1)
+        # 5. Взвешенный алгоритм
+        per_frame = get_weighted_cough_score(scores)
 
+        # Сглаживание
         per_frame_smoothed = np.convolve(per_frame, np.ones(3)/3, mode='same')
+
         max_peak = float(np.max(per_frame_smoothed))
-        cough_detected = max_peak > 0.005
 
+        # Порог стал мягче из-за весов
+        cough_detected = max_peak > 0.004
 
-        # 6. Топ классы
+        # 6. Топ-5 классов
         mean_scores = np.mean(scores, axis=0)
         top5_idx = np.argsort(mean_scores)[-5:][::-1]
         top5 = [(CLASS_NAMES[i], float(mean_scores[i])) for i in top5_idx]
@@ -495,10 +528,15 @@ def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
         return {
             "probability": max_peak,
             "cough_detected": cough_detected,
+            "multiple_coughs": False,
+            "cough_count": int(np.sum(per_frame_smoothed > 0.02)),
+            "cough_peaks_sec": [],
             "message": "peak_detected" if cough_detected else "no_significant_peaks",
             "max_probability": max_peak,
+            "mean_probability": float(np.mean(per_frame_smoothed)),
             "total_frames": len(per_frame),
-            "cough_frames": int(np.sum(per_frame > 0.1)),
+            "audio_duration_sec": len(y) / sr,
+            "cough_frames": int(np.sum(per_frame > 0.02)),
             "top_classes": top5,
             "decoding_method": decoding_result["method"]
         }
@@ -956,3 +994,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
