@@ -409,8 +409,8 @@ def accurate_cough_counter(per_frame_cough: np.ndarray, frame_hop_sec: float = 0
         return 0
 
     # ВЫШЕ порог для уверенного кашля
-    threshold = 0.3  # был 0.25
-    min_gap_sec = 0.5  # Минимум 0.5 сек между кашлями
+    threshold = 0.2  # был 0.25
+    min_gap_sec = 0.3  # Минимум 0.5 сек между кашлями
     min_duration_sec = 0.1  # Минимум 0.1 сек длительность
     min_gap_frames = max(1, int(min_gap_sec / frame_hop_sec))
     min_duration_frames = max(1, int(min_duration_sec / frame_hop_sec))
@@ -463,7 +463,7 @@ def get_weighted_cough_score(scores):
 
         # Прямой кашель — полный вес
         if "cough" in low or "throat" in low:
-            weight = 7.5
+            weight = 7.9
 
         # Дыхательные всплески — средний вес
         elif any(x in low for x in ["breath", "wheeze", "gasp", "snort"]):
@@ -471,7 +471,7 @@ def get_weighted_cough_score(scores):
 
         # Ошибочные, но частые животные — слабый вес
         elif any(x in low for x in ["animal", "dog", "pig", "oink", "roar", "growl"]):
-            weight = 0.0009
+            weight = 0.0004
 
         else:
             continue
@@ -495,7 +495,7 @@ def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
         sr = decoding_result['sr']
 
         # 2. Усиление / нормализация
-        def normalize_audio(y, target_peak=0.98):
+        def normalize_audio(y, target_peak=0.985):
             max_amp = np.max(np.abs(y))
             if max_amp < 1e-6:
                 return y
@@ -994,5 +994,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
