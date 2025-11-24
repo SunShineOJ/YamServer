@@ -463,7 +463,7 @@ def get_weighted_cough_score(scores):
 
         # Прямой кашель — полный вес
         if "cough" in low or "throat" in low:
-            weight = 7.1
+            weight = 6.4
 
         # Дыхательные всплески — средний вес
         elif any(x in low for x in ["breath", "wheeze", "gasp", "snort"]):
@@ -471,7 +471,7 @@ def get_weighted_cough_score(scores):
 
         # Ошибочные, но частые животные — слабый вес
         elif any(x in low for x in ["animal", "dog", "pig", "oink", "roar", "growl"]):
-            weight = 0.0003
+            weight = 0.0002
 
         else:
             continue
@@ -495,7 +495,7 @@ def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
         sr = decoding_result['sr']
 
         # 2. Усиление / нормализация
-        def normalize_audio(y, target_peak=0.985):
+        def normalize_audio(y, target_peak=0.982):
             max_amp = np.max(np.abs(y))
             if max_amp < 1e-6:
                 return y
@@ -994,6 +994,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
