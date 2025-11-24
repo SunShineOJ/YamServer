@@ -409,8 +409,8 @@ def accurate_cough_counter(per_frame_cough: np.ndarray, frame_hop_sec: float = 0
         return 0
 
     # ВЫШЕ порог для уверенного кашля
-    threshold = 0.22  # был 0.25
-    min_gap_sec = 0.35  # Минимум 0.5 сек между кашлями
+    threshold = 0.25  # был 0.25
+    min_gap_sec = 0.4  # Минимум 0.5 сек между кашлями
     min_duration_sec = 0.1  # Минимум 0.1 сек длительность
     min_gap_frames = max(1, int(min_gap_sec / frame_hop_sec))
     min_duration_frames = max(1, int(min_duration_sec / frame_hop_sec))
@@ -463,7 +463,7 @@ def get_weighted_cough_score(scores):
 
         # Прямой кашель — полный вес
         if "cough" in low or "throat" in low:
-            weight = 5.5
+            weight = 5.0
 
         # Дыхательные всплески — средний вес
         elif any(x in low for x in ["breath", "wheeze", "gasp", "snort"]):
@@ -471,7 +471,7 @@ def get_weighted_cough_score(scores):
 
         # Ошибочные, но частые животные — слабый вес
         elif any(x in low for x in ["animal", "dog", "pig", "oink", "roar", "growl"]):
-            weight = 0.00007
+            weight = 0.00006
 
         else:
             continue
@@ -994,6 +994,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
