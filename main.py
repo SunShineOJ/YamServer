@@ -463,7 +463,7 @@ def get_weighted_cough_score(scores):
 
         # Прямой кашель — полный вес
         if "cough" in low or "throat" in low:
-            weight = 3.4
+            weight = 3.2
 
         # Дыхательные всплески — средний вес
         elif any(x in low for x in ["breath", "wheeze", "gasp", "snort"]):
@@ -518,7 +518,7 @@ def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
         max_peak = float(np.max(per_frame_smoothed))
 
         # Порог стал мягче из-за весов
-        cough_detected = max_peak > 0.0046
+        cough_detected = max_peak > 0.0048
 
         # 6. Топ-5 классов
         mean_scores = np.mean(scores, axis=0)
@@ -994,6 +994,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
