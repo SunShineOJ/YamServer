@@ -471,7 +471,7 @@ def get_weighted_cough_score(scores):
 
         # Ошибочные, но частые животные — слабый вес
         elif any(x in low for x in ["animal", "dog", "pig", "oink", "roar", "growl"]):
-            weight = 0.00006
+            weight = 0.00005
 
         else:
             continue
@@ -994,6 +994,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
