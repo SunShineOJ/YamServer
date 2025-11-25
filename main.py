@@ -107,7 +107,7 @@ def load_models():
         logger.info("🔄 Loading our trained cough model...")
         
         # Загружаем нашу модель
-        OUR_MODEL = tf.keras.models.load_model('model.keras')
+        OUR_MODEL = tf.keras.models.load_model('model.keras', compile=False)
         logger.info("✅ Our cough model loaded successfully!")
         
         # Загружаем YAMNet только для извлечения фичей
@@ -383,16 +383,36 @@ def our_cough_detector(y: np.ndarray, sr: int, filename: str) -> Dict[str, Any]:
         _, embeddings, _ = YAMNET_MODEL(waveform_tf)
         avg_embedding = tf.reduce_mean(embeddings, axis=0).numpy().reshape(1, -1)
         
-        # Предсказание нашей моделью
-        prediction = OUR_MODEL.predict(avg_embedding, verbose=0)[0][0]
+        # Предсказание нашей моделью - ФИКС ОШИБКИ
+        predictions = OUR_MODEL.predict(avg_embedding, verbose=0)
+        
+        # Безопасное извлечение предсказания
+        if hasattr(predictions, '__len__') and len(predictions) > 0:
+            if hasattr(predictions[0], '__len__') and len(predictions[0]) > 0:
+                prediction = float(predictions[0][0])
+            else:
+                prediction = float(predictions[0])
+        else:
+            prediction = 0.0
         
         # Используем оптимальный порог 0.5 (как в тестах)
         is_cough = prediction > 0.5
         
         # Для совместимости со старым приложением
         cough_idxs = [i for i, n in enumerate(CLASS_NAMES) if 'cough' in n.lower()]
-        top5_idx = np.argsort(np.mean(embeddings, axis=0))[-5:][::-1]
-        top5 = [(CLASS_NAMES[i], float(np.mean(embeddings[:, i]))) for i in top5_idx]
+        
+        # Безопасное создание top_classes
+        try:
+            mean_embeddings = np.mean(embeddings, axis=0)
+            if len(mean_embeddings) > 0:
+                top5_idx = np.argsort(mean_embeddings)[-5:][::-1]
+                top5 = [(CLASS_NAMES[i] if i < len(CLASS_NAMES) else f"class_{i}", 
+                        float(mean_embeddings[i] if i < len(mean_embeddings) else 0.0)) 
+                       for i in top5_idx]
+            else:
+                top5 = [("No features", 0.0)]
+        except:
+            top5 = [("Error", 0.0)]
         
         logger.info(f"🎯 OUR MODEL: {filename} | confidence={prediction:.3f} | cough={is_cough}")
         
@@ -408,12 +428,15 @@ def our_cough_detector(y: np.ndarray, sr: int, filename: str) -> Dict[str, Any]:
             "top_classes": top5,
             "cough_stats": {
                 "confidence": float(prediction),
-                "model_used": "our_trained_model"
+                "model_used": "our_trained_model",
+                "threshold_used": 0.5
             }
         }
         
     except Exception as e:
         logger.error(f"Our model detection failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return {
             "probability": 0.0,
             "cough_detected": False,
@@ -504,25 +527,6 @@ def convert_to_wav_ffmpeg(audio_bytes: bytes) -> str:
         raise
     finally:
         os.unlink(tmp_in.name)
-
-def convert_numpy_types(obj):
-    """Рекурсивно преобразует numpy типы в стандартные Python типы"""
-    if isinstance(obj, dict):
-        return {key: convert_numpy_types(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_numpy_types(item) for item in obj]
-    elif isinstance(obj, tuple):
-        return tuple(convert_numpy_types(item) for item in obj)
-    elif isinstance(obj, (np.int32, np.int64)):
-        return int(obj)
-    elif isinstance(obj, (np.float32, np.float64)):
-        return float(obj)
-    elif isinstance(obj, np.bool_):
-        return bool(obj)
-    elif isinstance(obj, np.ndarray):
-        return convert_numpy_types(obj.tolist())
-    else:
-        return obj
 
 # ---- Auto Cleanup ----
 def cleanup_old_files():
@@ -647,13 +651,13 @@ async def get_stats(device_id: str):
         today = get_current_date()
         logger.info(f"📊 Запрос статистики для device_id: {device_id}, дата: {today}")
         
-        # Основная статистика за сегодня
+        # Основная статистика за сегодня - ФИКС СТАТИСТИКИ
         cursor.execute('''
             SELECT COUNT(*), 
                    SUM(CASE WHEN cough_detected=1 THEN 1 ELSE 0 END),
                    AVG(CASE WHEN cough_detected=1 THEN probability ELSE NULL END)
             FROM cough_records 
-            WHERE device_id=? AND DATE(timestamp)=?
+            WHERE device_id=? AND date(timestamp)=?
         ''', (device_id, today))
         
         stats = cursor.fetchone()
@@ -663,20 +667,22 @@ async def get_stats(device_id: str):
         
         logger.info(f"📊 Статистика сегодня: total={total}, coughs={total_coughs}, avg_prob={avg_prob}")
         
-        # Статистика по часам
+        # Статистика по часам - ФИКС СТАТИСТИКИ
         cursor.execute('''
             SELECT strftime('%H', timestamp) as hr, COUNT(*) 
             FROM cough_records
-            WHERE device_id=? AND cough_detected=1 AND DATE(timestamp)=?
+            WHERE device_id=? AND cough_detected=1 AND date(timestamp)=?
             GROUP BY hr
+            ORDER BY hr
         ''', (device_id, today))
         rows = cursor.fetchall()
-        hourly = [{"hour": f"{h}:00", "count": c} for h, c in rows]
+        hourly = [{"hour": f"{int(h)}:00", "count": c} for h, c in rows]
         
         # Заполняем пропущенные часы нулями
+        existing_hours = {item["hour"] for item in hourly}
         for hh in range(24):
             hs = f"{hh:02d}:00"
-            if not any(item["hour"] == hs for item in hourly):
+            if hs not in existing_hours:
                 hourly.append({"hour": hs, "count": 0})
         hourly.sort(key=lambda x: x["hour"])
         
@@ -714,9 +720,10 @@ async def get_stats(device_id: str):
             # Тренд
             cursor.execute('''
                 SELECT COUNT(*) FROM cough_records 
-                WHERE device_id=? AND cough_detected=1 AND DATE(timestamp)=DATE('now', '-1 day')
-            ''', (device_id,))
-            yesterday_coughs = cursor.fetchone()[0] or 0
+                WHERE device_id=? AND cough_detected=1 AND date(timestamp)=date(?, '-1 day')
+            ''', (device_id, today))
+            yesterday_result = cursor.fetchone()
+            yesterday_coughs = int(yesterday_result[0]) if yesterday_result and yesterday_result[0] is not None else 0
             
             if total_coughs > yesterday_coughs:
                 trend = "📈 Растет"
@@ -749,7 +756,7 @@ async def get_stats(device_id: str):
         
     except Exception as e:
         logger.exception(f"Stats error: {e}")
-        return JSONResponse({"status": "error", "message": str(e)})
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/health")
 async def health_check():
