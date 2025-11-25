@@ -435,7 +435,7 @@ def accurate_cough_counter(per_frame_cough: np.ndarray, frame_hop_sec: float = 0
             
             # Проверяем что это достаточно длинный кашель
             if cough_duration >= min_duration_sec and (cough_start - last_peak_end) >= min_gap_frames:
-                cough_peaks += 1
+                cough_peaks = 1
                 last_peak_end = i
     
     # Обрабатываем случай, когда кашель до конца записи
@@ -994,6 +994,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
