@@ -462,8 +462,10 @@ def get_weighted_cough_score(scores):
         low = class_name.lower()
 
         # Прямой кашель — полный вес
-        if "cough" in low or "throat" in low:
-            weight = 1.7
+        if "cough" in low:
+            weight = 2.0  # Увеличил вес для четкого кашля
+        elif "throat" in low or "clear" in low:
+            weight = 1.5  # Связанные с горлом звуки
 
         # Дыхательные всплески — средний вес
         elif any(x in low for x in ["breath", "wheeze", "gasp", "snort"]):
@@ -472,6 +474,9 @@ def get_weighted_cough_score(scores):
         # Ошибочные, но частые животные — слабый вес
         elif any(x in low for x in ["animal", "dog", "pig", "oink", "roar", "growl"]):
             weight = 0.00002
+
+        elif any(x in low for x in ["silence", "background noise", "static", "hum", "buzz"]):
+            weight = 0.0  # Штрафуем фоновые шумы
 
         else:
             continue
@@ -994,6 +999,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
