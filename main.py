@@ -134,7 +134,7 @@ def analyze_audio(audio_bytes: bytes, filename: str) -> dict:
         prediction = OUR_MODEL.predict(combined_features, verbose=0)
         prob = float(prediction[0][0])
         
-        is_cough = prob > 0.60
+        is_cough = prob > 0.57
         
         logger.info(f"🎯 IMPROVED MODEL: {filename} | prob={prob:.3f} | cough={is_cough}")
         
@@ -142,7 +142,8 @@ def analyze_audio(audio_bytes: bytes, filename: str) -> dict:
             "probability": prob,
             "cough_detected": is_cough,
             "confidence": prob,
-            "message": "COUGH_DETECTED" if is_cough else "NO_COUGH"
+            "message": "COUGH_DETECTED" if is_cough else "NO_COUGH",
+            "cough_count": 1 if is_cough else 0
         }
         
     except Exception as e:
@@ -314,3 +315,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting FIXED STATS server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
