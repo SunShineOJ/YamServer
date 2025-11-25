@@ -523,7 +523,7 @@ def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
         max_peak = float(np.max(per_frame_smoothed))
 
         # Порог стал мягче из-за весов
-        cough_detected = max_peak > 0.0042
+        cough_detected = max_peak > 0.0055
 
         # 6. Топ-5 классов
         mean_scores = np.mean(scores, axis=0)
@@ -534,7 +534,7 @@ def analyze_audio_improved(audio_bytes: bytes, filename: str) -> Dict[str, Any]:
             "probability": max_peak,
             "cough_detected": cough_detected,
             "multiple_coughs": False,
-            "cough_count": int(np.sum(per_frame_smoothed > 0.5)),
+            "cough_count": int(np.sum(per_frame_smoothed > 0.2)),
             "cough_peaks_sec": [],
             "message": "peak_detected" if cough_detected else "no_significant_peaks",
             "max_probability": max_peak,
@@ -999,6 +999,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting enhanced server on 0.0.0.0:{port}, YAMNet loaded: {YAMNET_LOADED}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
