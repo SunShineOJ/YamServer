@@ -395,8 +395,9 @@ def our_cough_detector(y: np.ndarray, sr: int, filename: str) -> Dict[str, Any]:
         else:
             prediction = 0.0
         
-        # Используем оптимальный порог 0.5 (как в тестах)
-        is_cough = prediction > 0.5
+        # ПОВЫШАЕМ ПОРОГ ДЛЯ УМЕНЬШЕНИЯ ЛОЖНЫХ СРАБАТЫВАНИЙ
+        # Вместо 0.5 используем 0.7 для большей уверенности
+        is_cough = prediction > 0.7
         
         # Для совместимости со старым приложением
         cough_idxs = [i for i, n in enumerate(CLASS_NAMES) if 'cough' in n.lower()]
@@ -414,7 +415,7 @@ def our_cough_detector(y: np.ndarray, sr: int, filename: str) -> Dict[str, Any]:
         except:
             top5 = [("Error", 0.0)]
         
-        logger.info(f"🎯 OUR MODEL: {filename} | confidence={prediction:.3f} | cough={is_cough}")
+        logger.info(f"🎯 OUR MODEL: {filename} | confidence={prediction:.3f} | cough={is_cough} | threshold=0.7")
         
         return {
             "probability": float(prediction),
@@ -429,7 +430,7 @@ def our_cough_detector(y: np.ndarray, sr: int, filename: str) -> Dict[str, Any]:
             "cough_stats": {
                 "confidence": float(prediction),
                 "model_used": "our_trained_model",
-                "threshold_used": 0.5
+                "threshold_used": 0.7  # Обновляем порог
             }
         }
         
@@ -643,6 +644,7 @@ async def upload_audio(audio: UploadFile = File(...), device_id: str = Form("unk
 
 @app.get("/stats/{device_id}")
 async def get_stats(device_id: str):
+    """СТАТИСТИКА - ПОЛНОСТЬЮ ПЕРЕПИСАНА ДЛЯ СОВМЕСТИМОСТИ"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -651,40 +653,38 @@ async def get_stats(device_id: str):
         today = get_current_date()
         logger.info(f"📊 Запрос статистики для device_id: {device_id}, дата: {today}")
         
-        # Основная статистика за сегодня - ФИКС СТАТИСТИКИ
+        # Основная статистика за сегодня - УПРОЩЕННАЯ ВЕРСИЯ
         cursor.execute('''
-            SELECT COUNT(*), 
-                   SUM(CASE WHEN cough_detected=1 THEN 1 ELSE 0 END),
-                   AVG(CASE WHEN cough_detected=1 THEN probability ELSE NULL END)
+            SELECT 
+                COUNT(*) as total_recordings,
+                SUM(CASE WHEN cough_detected=1 THEN 1 ELSE 0 END) as total_coughs,
+                AVG(CASE WHEN cough_detected=1 THEN probability ELSE NULL END) as avg_probability
             FROM cough_records 
             WHERE device_id=? AND date(timestamp)=?
         ''', (device_id, today))
         
-        stats = cursor.fetchone()
-        total = int(stats[0] or 0) if stats else 0
-        total_coughs = int(stats[1] or 0) if stats else 0
-        avg_prob = float(stats[2] or 0.0) if stats and stats[2] is not None else 0.0
+        row = cursor.fetchone()
+        if row:
+            total_recordings = int(row[0] or 0)
+            total_coughs = int(row[1] or 0)
+            avg_probability = float(row[2] or 0.0)
+        else:
+            total_recordings = 0
+            total_coughs = 0
+            avg_probability = 0.0
         
-        logger.info(f"📊 Статистика сегодня: total={total}, coughs={total_coughs}, avg_prob={avg_prob}")
+        logger.info(f"📊 Статистика сегодня: total={total_recordings}, coughs={total_coughs}, avg_prob={avg_probability}")
         
-        # Статистика по часам - ФИКС СТАТИСТИКИ
-        cursor.execute('''
-            SELECT strftime('%H', timestamp) as hr, COUNT(*) 
-            FROM cough_records
-            WHERE device_id=? AND cough_detected=1 AND date(timestamp)=?
-            GROUP BY hr
-            ORDER BY hr
-        ''', (device_id, today))
-        rows = cursor.fetchall()
-        hourly = [{"hour": f"{int(h)}:00", "count": c} for h, c in rows]
-        
-        # Заполняем пропущенные часы нулями
-        existing_hours = {item["hour"] for item in hourly}
-        for hh in range(24):
-            hs = f"{hh:02d}:00"
-            if hs not in existing_hours:
-                hourly.append({"hour": hs, "count": 0})
-        hourly.sort(key=lambda x: x["hour"])
+        # Статистика по часам - УПРОЩЕННАЯ
+        hourly_stats = []
+        for hour in range(24):
+            hour_str = f"{hour:02d}:00"
+            cursor.execute('''
+                SELECT COUNT(*) FROM cough_records
+                WHERE device_id=? AND cough_detected=1 AND date(timestamp)=? AND strftime('%H', timestamp)=?
+            ''', (device_id, today, f"{hour:02d}"))
+            count = cursor.fetchone()[0] or 0
+            hourly_stats.append({"hour": hour_str, "count": count})
         
         # Последние случаи кашля
         cursor.execute('''
@@ -695,29 +695,23 @@ async def get_stats(device_id: str):
         recent_coughs = [{"time": row[0], "probability": float(row[1])} for row in cursor.fetchall()]
         
         # Анализ паттернов
-        peak_hours = "Нет данных"
-        cough_frequency = "0 раз/день"
-        intensity = "Низкая"
-        trend = "📊"
-        
         if total_coughs > 0:
             # Находим пиковые часы
-            if hourly:
-                max_hour = max(hourly, key=lambda x: x["count"])
-                peak_hours = f"{max_hour['hour']} ({max_hour['count']} раз)"
+            max_hour = max(hourly_stats, key=lambda x: x["count"])
+            peak_hours = f"{max_hour['hour']} ({max_hour['count']} раз)"
             
             # Частота кашля
             cough_frequency = f"{total_coughs} раз/день"
             
             # Интенсивность
-            if avg_prob > 0.7:
+            if avg_probability > 0.7:
                 intensity = "Высокая"
-            elif avg_prob > 0.3:
+            elif avg_probability > 0.3:
                 intensity = "Средняя"
             else:
                 intensity = "Низкая"
             
-            # Тренд
+            # Тренд (простая версия)
             cursor.execute('''
                 SELECT COUNT(*) FROM cough_records 
                 WHERE device_id=? AND cough_detected=1 AND date(timestamp)=date(?, '-1 day')
@@ -731,17 +725,22 @@ async def get_stats(device_id: str):
                 trend = "📉 Снижается"
             else:
                 trend = "➡️ Стабильно"
+        else:
+            peak_hours = "Нет данных"
+            cough_frequency = "0 раз/день"
+            intensity = "Низкая"
+            trend = "📊"
         
         conn.close()
         
         result = {
             "today_stats": {
-                "total_recordings": total,
+                "total_recordings": total_recordings,
                 "total_coughs": total_coughs,
-                "avg_probability": round(avg_prob, 3),
+                "avg_probability": round(avg_probability, 3),
                 "intensity": intensity
             },
-            "hourly_stats": hourly,
+            "hourly_stats": hourly_stats,
             "recent_coughs": recent_coughs,
             "patterns": {
                 "peak_hours": peak_hours,
@@ -756,7 +755,10 @@ async def get_stats(device_id: str):
         
     except Exception as e:
         logger.exception(f"Stats error: {e}")
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        return JSONResponse(
+            {"status": "error", "message": f"Stats error: {str(e)}"}, 
+            status_code=500
+        )
 
 @app.get("/health")
 async def health_check():
@@ -766,8 +768,8 @@ async def health_check():
         "model_loaded": MODEL_LOADED,
         "model_type": "our_trained_cough_detector",
         "accuracy": "92% (tested)",
-        "timestamp": datetime.now().isoformat(),
-        "upload_folder_size": sum(os.path.getsize(os.path.join(UPLOAD_FOLDER, f)) for f in os.listdir(UPLOAD_FOLDER) if os.path.isfile(os.path.join(UPLOAD_FOLDER, f)))
+        "threshold": "0.7 (reduced false positives)",
+        "timestamp": datetime.now().isoformat()
     }
 
 @app.post("/cleanup")
