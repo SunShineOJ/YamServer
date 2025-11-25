@@ -1,4 +1,4 @@
-# server_fixed.py
+# server_working.py
 import os
 import logging
 import sqlite3
@@ -38,6 +38,8 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    logger.info("✅ Database initialized")
+
 init_db()
 
 # ---- Models ----
@@ -55,18 +57,18 @@ def load_models():
 
 load_models()
 
-def process_audio_like_colab(audio_bytes: bytes, filename: str):
+def process_audio_like_colab(audio_bytes: bytes):
     """ОБРАБАТЫВАЕМ ТОЧНО КАК В КОЛАБЕ"""
+    tmp_path = None
     try:
-        # Сохраняем во временный файл и обрабатываем как в колабе
+        # Сохраняем во временный файл
         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
         
         # ТОЧНО ТАК ЖЕ КАК В ОБУЧЕНИИ!
-        waveform, sr = librosa.load(tmp_path, sr=16000, duration=1.0)  # duration=1.0 ВАЖНО!
+        waveform, sr = librosa.load(tmp_path, sr=16000, duration=1.0)
         
-        # ТОЧНО ТАК ЖЕ КАК В ОБУЧЕНИИ!
         target_length = 16000
         if len(waveform) < target_length:
             padding = target_length - len(waveform)
@@ -74,17 +76,17 @@ def process_audio_like_colab(audio_bytes: bytes, filename: str):
         else:
             waveform = waveform[:target_length]
 
-        # ТОЧНО ТАК ЖЕ КАК В ОБУЧЕНИИ!
         if np.max(np.abs(waveform)) > 0:
             waveform = waveform / np.max(np.abs(waveform))
         
-        os.unlink(tmp_path)
         return waveform
         
     except Exception as e:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+        logger.error(f"Audio processing error: {e}")
         raise e
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 def analyze_audio(audio_bytes: bytes, filename: str) -> dict:
     """АНАЛИЗ ТОЧНО КАК В КОЛАБЕ"""
@@ -93,33 +95,34 @@ def analyze_audio(audio_bytes: bytes, filename: str) -> dict:
     
     try:
         # 1. Обрабатываем аудио ТОЧНО как в колабе
-        waveform = process_audio_like_colab(audio_bytes, filename)
+        waveform = process_audio_like_colab(audio_bytes)
         
-        # 2. Проверка на тишину (как в колабе)
-        rms = np.sqrt(np.mean(waveform**2))
+        # 2. Проверка на тишину
+        rms = float(np.sqrt(np.mean(waveform**2)))  # ФИКС: конвертируем в float
         if rms < 0.001:
             return {"probability": 0.0, "cough_detected": False, "message": "Silence"}
         
-        # 3. Извлекаем фичи ТОЧНО как в колабе
+        # 3. Извлекаем фичи
         waveform_tf = tf.convert_to_tensor(waveform, dtype=tf.float32)
         _, embeddings, _ = YAMNET_MODEL(waveform_tf)
         avg_embedding = tf.reduce_mean(embeddings, axis=0).numpy().reshape(1, -1)
         
         # 4. Предсказание
         prediction = OUR_MODEL.predict(avg_embedding, verbose=0)
-        prob = float(prediction[0][0]) if hasattr(prediction[0], '__len__') else float(prediction[0])
+        prob = float(prediction[0][0])  # ФИКС: конвертируем в Python float
         
-        # 5. Порог как в колабе (0.5 или найденный оптимальный)
+        # 5. Порог
         is_cough = prob > 0.5
         
         logger.info(f"🎯 Analysis: {filename} | prob={prob:.3f} | rms={rms:.4f} | cough={is_cough}")
         
+        # ФИКС: все значения должны быть JSON-сериализуемы
         return {
-            "probability": prob,
-            "cough_detected": is_cough,
-            "confidence": prob,
+            "probability": float(prob),
+            "cough_detected": bool(is_cough),
+            "confidence": float(prob),
             "message": "COUGH" if is_cough else "NO_COUGH",
-            "rms_level": rms
+            "rms_level": float(rms)
         }
         
     except Exception as e:
@@ -144,7 +147,12 @@ async def upload_audio(audio: UploadFile = File(...), device_id: str = Form("unk
         cursor.execute('''
             INSERT INTO cough_records (device_id, filename, probability, cough_detected, timestamp)
             VALUES (?, ?, ?, ?, datetime('now'))
-        ''', (device_id, audio.filename, result["probability"], int(result["cough_detected"])))
+        ''', (
+            device_id, 
+            audio.filename, 
+            float(result["probability"]),  # ФИКС: конвертируем
+            int(result["cough_detected"])
+        ))
         conn.commit()
         conn.close()
         
@@ -156,37 +164,134 @@ async def upload_audio(audio: UploadFile = File(...), device_id: str = Form("unk
 
 @app.get("/stats/{device_id}")
 async def get_stats(device_id: str):
+    """РАБОЧАЯ статистика"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         today = datetime.now().strftime("%Y-%m-%d")
         
+        # Основная статистика
         cursor.execute('''
-            SELECT COUNT(*), SUM(cough_detected) FROM cough_records 
+            SELECT 
+                COUNT(*) as total_recordings,
+                SUM(cough_detected) as total_coughs,
+                AVG(CASE WHEN cough_detected=1 THEN probability ELSE NULL END) as avg_probability
+            FROM cough_records 
             WHERE device_id=? AND date(timestamp)=?
         ''', (device_id, today))
         
         row = cursor.fetchone()
-        total = row[0] or 0
-        coughs = row[1] or 0
+        total_recordings = int(row[0] or 0) if row else 0
+        total_coughs = int(row[1] or 0) if row else 0
+        avg_probability = float(row[2] or 0.0) if row and row[2] is not None else 0.0
         
-        return {
+        # Статистика по часам
+        hourly_stats = []
+        for hour in range(24):
+            hour_str = f"{hour:02d}:00"
+            cursor.execute('''
+                SELECT COUNT(*) FROM cough_records
+                WHERE device_id=? AND cough_detected=1 AND date(timestamp)=? 
+                AND strftime('%H', timestamp)=?
+            ''', (device_id, today, f"{hour:02d}"))
+            count_row = cursor.fetchone()
+            count = int(count_row[0] or 0) if count_row else 0
+            hourly_stats.append({"hour": hour_str, "count": count})
+        
+        # Последние кашли
+        cursor.execute('''
+            SELECT timestamp, probability FROM cough_records
+            WHERE device_id=? AND cough_detected=1
+            ORDER BY timestamp DESC LIMIT 10
+        ''', (device_id,))
+        recent_coughs = [
+            {"time": row[0], "probability": float(row[1])} 
+            for row in cursor.fetchall()
+        ]
+        
+        conn.close()
+        
+        result = {
             "today_stats": {
-                "total_recordings": total,
-                "total_coughs": coughs
+                "total_recordings": total_recordings,
+                "total_coughs": total_coughs,
+                "avg_probability": round(avg_probability, 3)
             },
+            "hourly_stats": hourly_stats,
+            "recent_coughs": recent_coughs,
             "device_id": device_id,
             "date": today
         }
         
+        logger.info(f"📊 Stats for {device_id}: {total_coughs} coughs today")
+        return result
+        
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        logger.error(f"Stats error: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=500
+        )
+
+@app.get("/debug/stats/{device_id}")
+async def debug_stats(device_id: str):
+    """Отладочная статистика"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(*), SUM(cough_detected) FROM cough_records 
+            WHERE device_id=?
+        ''', (device_id,))
+        
+        row = cursor.fetchone()
+        total = row[0] if row else 0
+        coughs = row[1] if row else 0
+        
+        cursor.execute('''
+            SELECT filename, probability, cough_detected, timestamp 
+            FROM cough_records 
+            WHERE device_id=? 
+            ORDER BY timestamp DESC LIMIT 5
+        ''', (device_id,))
+        
+        recent = [
+            {
+                "filename": row[0],
+                "probability": float(row[1]),
+                "cough_detected": bool(row[2]),
+                "timestamp": row[3]
+            }
+            for row in cursor.fetchall()
+        ]
+        
+        conn.close()
+        
+        return {
+            "device_id": device_id,
+            "total_records": total,
+            "total_coughs": coughs,
+            "recent_entries": recent
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "model_loaded": OUR_MODEL is not None}
+    return JSONResponse({
+        "status": "healthy", 
+        "model_loaded": OUR_MODEL is not None,
+        "timestamp": datetime.now().isoformat()
+    })
+
+@app.get("/")
+async def root():
+    return {"message": "Cough Detection Server", "status": "running"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
+    logger.info(f"🚀 Starting server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
