@@ -134,7 +134,7 @@ def analyze_audio(audio_bytes: bytes, filename: str) -> dict:
         prediction = OUR_MODEL.predict(combined_features, verbose=0)
         prob = float(prediction[0][0])
         
-        is_cough = prob > 0.5
+        is_cough = prob > 0.556
         
         logger.info(f"🎯 IMPROVED MODEL: {filename} | prob={prob:.3f} | cough={is_cough}")
         
@@ -315,6 +315,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting FIXED STATS server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
