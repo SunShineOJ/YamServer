@@ -311,10 +311,188 @@ async def health_check():
 async def root():
     return {"message": "Improved Cough Detection Server", "status": "running"}
 
+
+# server_fixed_stats.py - ДОБАВЛЯЕМ НОВЫЕ ФУНКЦИИ
+
+@app.get("/stats/{device_id}/range")
+async def get_stats_range(device_id: str, start_date: str, end_date: str):
+    """Статистика за произвольный период"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        logger.info(f"📊 RANGE STATS: device_id={device_id}, period={start_date} to {end_date}")
+        
+        # Основная статистика за период
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_recordings,
+                SUM(cough_detected) as total_coughs,
+                AVG(CASE WHEN cough_detected=1 THEN probability ELSE NULL END) as avg_probability
+            FROM cough_records 
+            WHERE device_id=? AND DATE(timestamp) BETWEEN ? AND ?
+        ''', (device_id, start_date, end_date))
+        
+        stats = cursor.fetchone()
+        total_recordings = int(stats[0] or 0) if stats else 0
+        total_coughs = int(stats[1] or 0) if stats else 0
+        avg_probability = float(stats[2] or 0.0) if stats and stats[2] is not None else 0.0
+        
+        # Статистика по дням
+        cursor.execute('''
+            SELECT 
+                DATE(timestamp) as date,
+                COUNT(*) as total_recordings,
+                SUM(cough_detected) as daily_coughs,
+                AVG(CASE WHEN cough_detected=1 THEN probability ELSE NULL END) as avg_probability
+            FROM cough_records 
+            WHERE device_id=? AND DATE(timestamp) BETWEEN ? AND ?
+            GROUP BY DATE(timestamp)
+            ORDER BY date
+        ''', (device_id, start_date, end_date))
+        
+        daily_stats = []
+        for row in cursor.fetchall():
+            daily_stats.append({
+                "date": row[0],
+                "total_recordings": row[1],
+                "total_coughs": row[2],
+                "avg_probability": float(row[3] or 0.0)
+            })
+        
+        # Статистика по неделям
+        cursor.execute('''
+            SELECT 
+                strftime('%Y-%W', timestamp) as week,
+                COUNT(*) as total_recordings,
+                SUM(cough_detected) as weekly_coughs,
+                AVG(CASE WHEN cough_detected=1 THEN probability ELSE NULL END) as avg_probability
+            FROM cough_records 
+            WHERE device_id=? AND DATE(timestamp) BETWEEN ? AND ?
+            GROUP BY strftime('%Y-%W', timestamp)
+            ORDER BY week
+        ''', (device_id, start_date, end_date))
+        
+        weekly_stats = []
+        for row in cursor.fetchall():
+            weekly_stats.append({
+                "week": row[0],
+                "total_recordings": row[1],
+                "total_coughs": row[2],
+                "avg_probability": float(row[3] or 0.0)
+            })
+        
+        conn.close()
+        
+        result = {
+            "period_stats": {
+                "start_date": start_date,
+                "end_date": end_date,
+                "total_recordings": total_recordings,
+                "total_coughs": total_coughs,
+                "avg_probability": round(avg_probability, 3)
+            },
+            "daily_stats": daily_stats,
+            "weekly_stats": weekly_stats
+        }
+        
+        logger.info(f"📊 Range stats result: {result}")
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Range stats error: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=500
+        )
+
+@app.get("/stats/{device_id}/available_dates")
+async def get_available_dates(device_id: str):
+    """Получить все доступные даты для устройства"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT DISTINCT DATE(timestamp) as date 
+            FROM cough_records 
+            WHERE device_id=? 
+            ORDER BY date DESC
+        ''', (device_id,))
+        
+        dates = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        return {"available_dates": dates}
+        
+    except Exception as e:
+        logger.exception(f"Available dates error: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=500
+        )
+
+@app.get("/stats/{device_id}/daily/{date}")
+async def get_daily_stats(device_id: str, date: str):
+    """Статистика за конкретный день"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Основная статистика за день
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_recordings,
+                SUM(cough_detected) as total_coughs,
+                AVG(CASE WHEN cough_detected=1 THEN probability ELSE NULL END) as avg_probability
+            FROM cough_records 
+            WHERE device_id=? AND DATE(timestamp)=?
+        ''', (device_id, date))
+        
+        stats = cursor.fetchone()
+        total_recordings = int(stats[0] or 0) if stats else 0
+        total_coughs = int(stats[1] or 0) if stats else 0
+        avg_probability = float(stats[2] or 0.0) if stats and stats[2] is not None else 0.0
+        
+        # Почасовые данные
+        hourly_stats = []
+        for hour in range(24):
+            hour_str = f"{hour:02d}:00"
+            cursor.execute('''
+                SELECT COUNT(*) FROM cough_records
+                WHERE device_id=? AND cough_detected=1 AND DATE(timestamp)=? 
+                AND strftime('%H', timestamp)=?
+            ''', (device_id, date, f"{hour:02d}"))
+            count_row = cursor.fetchone()
+            count = int(count_row[0] or 0) if count_row else 0
+            hourly_stats.append({"hour": hour_str, "count": count})
+        
+        conn.close()
+        
+        result = {
+            "date": date,
+            "stats": {
+                "total_recordings": total_recordings,
+                "total_coughs": total_coughs,
+                "avg_probability": round(avg_probability, 3)
+            },
+            "hourly_stats": hourly_stats
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Daily stats error: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=500
+        )
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"🚀 Starting FIXED STATS server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
 
 
 
